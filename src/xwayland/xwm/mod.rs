@@ -1479,11 +1479,28 @@ where
                     let geo = conn.get_geometry(r.window)?.reply()?;
                     let win = r.window;
                     let frame_win = conn.generate_id()?;
-                    let win_aux = CreateWindowAux::new().event_mask(
+                    let mut win_aux = CreateWindowAux::new().event_mask(
                         EventMask::SUBSTRUCTURE_NOTIFY
                             | EventMask::SUBSTRUCTURE_REDIRECT
                             | EventMask::PROPERTY_CHANGE,
                     );
+                    // Helix: the frame takes the window's own depth and
+                    // visual, so a window with an alpha channel (a 32-bit
+                    // ARGB visual, as GTK uses for rounded client-side
+                    // decorations) keeps it. A frame of the root's depth
+                    // (24) drops the alpha, and transparent corners show
+                    // black. A frame of another depth than its parent
+                    // needs a border pixel and a colormap of its visual.
+                    let (depth, visual) = if geo.depth != xwm.screen.root_depth {
+                        let attrs = conn.get_window_attributes(win)?.reply()?;
+                        win_aux = win_aux
+                            .border_pixel(0)
+                            .background_pixel(0)
+                            .colormap(attrs.colormap);
+                        (geo.depth, attrs.visual)
+                    } else {
+                        (COPY_DEPTH_FROM_PARENT, x11rb::COPY_FROM_PARENT)
+                    };
 
                     {
                         let _guard = scopeguard::guard((), |_| {
@@ -1492,7 +1509,7 @@ where
 
                         conn.grab_server()?;
                         let cookie1 = conn.create_window(
-                            COPY_DEPTH_FROM_PARENT,
+                            depth,
                             frame_win,
                             xwm.screen.root,
                             geo.x,
@@ -1501,7 +1518,7 @@ where
                             geo.height,
                             0,
                             WindowClass::INPUT_OUTPUT,
-                            x11rb::COPY_FROM_PARENT,
+                            visual,
                             &win_aux,
                         )?;
                         let cookie2 = conn.reparent_window(win, frame_win, 0, 0)?;
