@@ -510,16 +510,22 @@ pub trait XwmHandler {
 
     /// Window requests to be set as active window.
     ///
-    /// A client may include a `currently_active_window` in the request to
-    /// indicate this is a focus change from another window by the same client.
+    /// `source` is who asks (EWMH: 1 an application, 2 a pager, 0 not
+    /// said). A client may include a `currently_active_window` in the
+    /// request to indicate this is a focus change from another window by
+    /// the same client.
+    ///
+    /// Helix: `source` added; Helix grants pagers (`wmctrl -a`) what it
+    /// only marks as wanting attention for an app.
     fn active_window_request(
         &mut self,
         xwm: XwmId,
         window: X11Surface,
+        source: u32,
         timestamp: u32,
         currently_active_window: Option<X11Surface>,
     ) {
-        let _ = (xwm, window, timestamp, currently_active_window);
+        let _ = (xwm, window, source, timestamp, currently_active_window);
     }
 
     /// Window has responded to a `_NET_WM_PING` request.
@@ -2710,12 +2716,12 @@ where
                 }
                 x if x == xwm.atoms._NET_ACTIVE_WINDOW => {
                     let data = msg.data.as_data32();
-                    let timestamp = data[1];
+                    let (source, timestamp) = (data[0], data[1]);
                     let currently_active_window =
                         xwm.windows.iter().find(|x| x.window_id() == data[2]).cloned();
                     if let Some(surface) = xwm.windows.iter().find(|x| x.window_id() == msg.window).cloned() {
                         drop(_guard);
-                        state.active_window_request(xwm_id, surface, timestamp, currently_active_window);
+                        state.active_window_request(xwm_id, surface, source, timestamp, currently_active_window);
                     }
                 }
                 x if x == xwm.atoms.WM_PROTOCOLS => {
