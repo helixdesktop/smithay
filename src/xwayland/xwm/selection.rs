@@ -354,7 +354,11 @@ pub fn write_selection_callback(
     match transfer.write_selection(fd) {
         Ok(true) => {
             if transfer.incr {
-                conn.delete_property(*transfer.window, atoms._WL_SELECTION)?;
+                // Helix: no delete here. Reading the chunk deleted the
+                // property already (which asks the owner for the next);
+                // deleting it again could drop the next chunk unread when
+                // the owner answered quickly, and the empty property read
+                // after it looked like the end of the transfer.
                 Ok(IncomingAction::WaitForProperty)
             } else {
                 debug!(?transfer, "Non-Incr Transfer complete!");
