@@ -1891,12 +1891,15 @@ where
                         .reply_unchecked()?
                     {
                         let type_ = prop.type_;
-                        transfer.read_selection_prop(prop);
+                        // Helix: an INCR property holds only a size hint,
+                        // not data (upstream d5437114); its 4 bytes were
+                        // put in front of every large paste.
                         if type_ == xwm.atoms.INCR {
                             transfer.incr = true;
                             return Ok(());
-                        } else if let Some(token) = transfer.token.as_ref() {
-                            let _ = loop_handle.enable(token);
+                        } else if transfer.token.is_some() {
+                            transfer.read_selection_prop(prop);
+                            let _ = loop_handle.enable(transfer.token.as_ref().unwrap());
                         } else if let Some(pos) =
                             selection.incoming.iter().position(|t| t.window == n.requestor)
                         {
@@ -2578,7 +2581,11 @@ fn write_selection_callback(
     match transfer.write_selection(fd) {
         Ok(true) => {
             if transfer.incr {
-                conn.delete_property(transfer.window, atoms._WL_SELECTION)?;
+                // Helix: no delete here. Reading the chunk deleted the
+                // property already (which asks the owner for the next);
+                // deleting it again could drop the next chunk unread when
+                // the owner answered quickly, and the empty property read
+                // after it looked like the end of the transfer.
                 Ok(IncomingAction::WaitForProperty)
             } else {
                 debug!(?transfer, "Non-Incr Transfer complete!");
