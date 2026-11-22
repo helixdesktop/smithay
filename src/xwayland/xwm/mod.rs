@@ -127,7 +127,8 @@ use x11rb::{
         xproto::{
             Atom, AtomEnum, ChangeWindowAttributesAux, ConfigWindow, ConfigureNotifyEvent,
             ConfigureWindowAux, ConnectionExt as _, CreateGCAux, CreateWindowAux, CursorWrapper, EventMask,
-            FontWrapper, GcontextWrapper, GetPropertyReply, ImageFormat, PixmapWrapper, PropMode, Property,
+            FontWrapper, GcontextWrapper, GetPropertyReply, ImageFormat, NotifyDetail, NotifyMode, PixmapWrapper,
+            PropMode, Property,
             QueryExtensionReply, Screen, SelectionNotifyEvent, SelectionRequestEvent, StackMode, WindowClass,
             CONFIGURE_NOTIFY_EVENT, SELECTION_NOTIFY_EVENT,
         },
@@ -353,6 +354,25 @@ pub trait XwmHandler {
     /// Window requests to be unminimized.
     fn unminimize_request(&mut self, xwm: XwmId, window: X11Surface) {
         let _ = (xwm, window);
+    }
+
+    /// Window requests to be set as active window (`_NET_ACTIVE_WINDOW`).
+    ///
+    /// `source` is who asks (EWMH: 1 an application, 2 a pager, 0 not
+    /// said). A client may include a `currently_active_window` in the
+    /// request to indicate this is a focus change from another window by
+    /// the same client.
+    ///
+    /// Helix: upstream d037d6c8, with `source` added.
+    fn active_window_request(
+        &mut self,
+        xwm: XwmId,
+        window: X11Surface,
+        source: u32,
+        timestamp: u32,
+        currently_active_window: Option<X11Surface>,
+    ) {
+        let _ = (xwm, window, source, timestamp, currently_active_window);
     }
 
     /// Window requests to be resized.
@@ -1427,9 +1447,11 @@ where
                 return Ok(());
             }
 
+            // Helix: and focus changes, for _NET_ACTIVE_WINDOW (upstream
+            // 5b299688).
             xwm.conn.change_window_attributes(
                 n.window,
-                &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE),
+                &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE | EventMask::FOCUS_CHANGE),
             )?;
             xwm.conn.flush()?;
 
@@ -2290,23 +2312,34 @@ where
                 }
             }
         }
-        Event::FocusIn(n) => {
+        // Helix: _NET_ACTIVE_WINDOW follows the X focus (upstream
+        // 5b299688, c0ac1231, a6a3fa41, 1fcc4850, deede709, f94618d9):
+        // none when the focus goes to none (a Wayland window has the
+        // keyboard), the client window that gets it otherwise, leaving out
+        // the pointer-root and grab focus events.
+        Event::FocusIn(n)
+            if n.event == xwm.screen.root && matches!(n.detail, NotifyDetail::NONE | NotifyDetail::POINTER_ROOT) =>
+        {
             conn.change_property32(
                 PropMode::REPLACE,
                 xwm.screen.root,
                 xwm.atoms._NET_ACTIVE_WINDOW,
                 AtomEnum::WINDOW,
-                &[n.event],
+                &[x11rb::NONE],
             )?;
         }
-        Event::FocusOut(n) => {
-            conn.change_property32(
-                PropMode::REPLACE,
-                xwm.screen.root,
-                xwm.atoms._NET_ACTIVE_WINDOW,
-                AtomEnum::WINDOW,
-                &[n.event],
-            )?;
+        Event::FocusIn(n)
+            if n.detail != NotifyDetail::POINTER && !matches!(n.mode, NotifyMode::GRAB | NotifyMode::UNGRAB) =>
+        {
+            if xwm.windows.iter().any(|x| x.window_id() == n.event) {
+                conn.change_property32(
+                    PropMode::REPLACE,
+                    xwm.screen.root,
+                    xwm.atoms._NET_ACTIVE_WINDOW,
+                    AtomEnum::WINDOW,
+                    &[n.event],
+                )?;
+            }
         }
         Event::ClientMessage(msg) => {
             if let Some(reply) = conn.get_atom_name(msg.type_)?.reply_unchecked()? {
@@ -2482,6 +2515,17 @@ where
                             8 => state.move_request(xwm_id, surface, data[3]),
                             _ => {} // ignore keyboard moves/resizes for now
                         }
+                    }
+                }
+                // Helix: activation requests (upstream d037d6c8), with
+                // their source (EWMH: 1 an app, 2 a pager).
+                x if x == xwm.atoms._NET_ACTIVE_WINDOW => {
+                    let data = msg.data.as_data32();
+                    let (source, timestamp) = (data[0], data[1]);
+                    let currently_active_window = xwm.windows.iter().find(|x| x.window_id() == data[2]).cloned();
+                    if let Some(surface) = xwm.windows.iter().find(|x| x.window_id() == msg.window).cloned() {
+                        drop(_guard);
+                        state.active_window_request(xwm_id, surface, source, timestamp, currently_active_window);
                     }
                 }
                 x => {
