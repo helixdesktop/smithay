@@ -75,9 +75,12 @@ pub(crate) struct SharedSurfaceState {
     hints: Option<WmHints>,
     normal_hints: Option<WmSizeHints>,
     transient_for: Option<X11Window>,
-    net_state: HashSet<Atom>,
+    pub(super) net_state: HashSet<Atom>,
     motif_hints: Vec<u32>,
     window_type: Vec<Atom>,
+    // Helix: the client's _NET_WM_STATE asked for these before mapping.
+    pub(super) fullscreen_at_map: bool,
+    pub(super) maximized_at_map: bool,
 }
 
 pub(super) type Protocols = Vec<WMProtocol>;
@@ -193,6 +196,8 @@ impl X11Surface {
                 net_state: HashSet::new(),
                 motif_hints: vec![0; 5],
                 window_type: Vec::new(),
+                fullscreen_at_map: false,
+                maximized_at_map: false,
             })),
             user_data: Arc::new(UserDataMap::new()),
         }
@@ -537,6 +542,52 @@ impl X11Surface {
             self.change_net_state(&[], &[self.atoms._NET_WM_STATE_HIDDEN])?;
         }
         Ok(())
+    }
+
+    /// Helix: whether the window is always on top (`_NET_WM_STATE_ABOVE`;
+    /// upstream 5b299688).
+    pub fn is_above(&self) -> bool {
+        self.state.lock().unwrap().net_state.contains(&self.atoms._NET_WM_STATE_ABOVE)
+    }
+
+    /// Helix: whether the window asks to be left out of taskbars
+    /// (`_NET_WM_STATE_SKIP_TASKBAR`; upstream 5b299688).
+    pub fn is_skip_taskbar(&self) -> bool {
+        self.state.lock().unwrap().net_state.contains(&self.atoms._NET_WM_STATE_SKIP_TASKBAR)
+    }
+
+    /// Helix: whether the window asks to be left out of pagers and
+    /// switchers (`_NET_WM_STATE_SKIP_PAGER`; upstream 5b299688).
+    pub fn is_skip_pager(&self) -> bool {
+        self.state.lock().unwrap().net_state.contains(&self.atoms._NET_WM_STATE_SKIP_PAGER)
+    }
+
+    /// Helix: whether the client asked for fullscreen before mapping.
+    pub fn fullscreen_at_map(&self) -> bool {
+        self.state.lock().unwrap().fullscreen_at_map
+    }
+
+    /// Helix: whether the client asked to be maximized before mapping.
+    pub fn maximized_at_map(&self) -> bool {
+        self.state.lock().unwrap().maximized_at_map
+    }
+
+    /// Helix: sets the window always on top or not (upstream 5b299688).
+    pub fn set_above(&self, above: bool) -> Result<(), ConnectionError> {
+        if above {
+            self.change_net_state(&[self.atoms._NET_WM_STATE_ABOVE], &[])
+        } else {
+            self.change_net_state(&[], &[self.atoms._NET_WM_STATE_ABOVE])
+        }
+    }
+
+    /// Helix: sets the window as a modal dialog or not (upstream ba0063fb).
+    pub fn set_modal(&self, modal: bool) -> Result<(), ConnectionError> {
+        if modal {
+            self.change_net_state(&[self.atoms._NET_WM_STATE_MODAL], &[])
+        } else {
+            self.change_net_state(&[], &[self.atoms._NET_WM_STATE_MODAL])
+        }
     }
 
     /// Sets the window as activated or not.

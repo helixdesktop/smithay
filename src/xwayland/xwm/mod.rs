@@ -204,6 +204,10 @@ mod atoms {
             _NET_WM_STATE_HIDDEN,
             _NET_WM_STATE_FULLSCREEN,
             _NET_WM_STATE_FOCUSED,
+            // Helix: (upstream 5b299688)
+            _NET_WM_STATE_ABOVE,
+            _NET_WM_STATE_SKIP_TASKBAR,
+            _NET_WM_STATE_SKIP_PAGER,
             _NET_SUPPORTING_WM_CHECK,
             _XSETTINGS_SETTINGS,
 
@@ -345,6 +349,26 @@ pub trait XwmHandler {
     }
     /// Window requests to be unfullscreened.
     fn unfullscreen_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+    /// Window requests to be set as a modal dialog (see [`X11Surface::is_popup`]).
+    ///
+    /// Helix: upstream ba0063fb.
+    fn modal_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+    /// Window requests to no longer be a modal dialog.
+    fn unmodal_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+    /// Window requests to be placed above other windows.
+    ///
+    /// Helix: upstream 5b299688.
+    fn above_request(&mut self, xwm: XwmId, window: X11Surface) {
+        let _ = (xwm, window);
+    }
+    /// Window requests to no longer be placed above other windows.
+    fn unabove_request(&mut self, xwm: XwmId, window: X11Surface) {
         let _ = (xwm, window);
     }
     /// Window requests to be minimized.
@@ -833,6 +857,10 @@ impl X11Wm {
                 atoms._NET_WM_STATE_FULLSCREEN,
                 atoms._NET_WM_STATE_MODAL,
                 atoms._NET_WM_STATE_FOCUSED,
+                // Helix: (upstream 5b299688; not BELOW, which Helix does not do)
+                atoms._NET_WM_STATE_ABOVE,
+                atoms._NET_WM_STATE_SKIP_TASKBAR,
+                atoms._NET_WM_STATE_SKIP_PAGER,
                 atoms._NET_ACTIVE_WINDOW,
                 atoms._NET_WM_MOVERESIZE,
                 atoms._NET_CLIENT_LIST,
@@ -1554,6 +1582,35 @@ where
                     // In that case, we set the X11Surface's override-redirect state to false here
                     // to prevent `set_mapped` and `configure` from failing.
                     surface.state.lock().unwrap().override_redirect = false;
+
+                    // Helix: the states the client set before mapping
+                    // (EWMH; upstream 5b299688). Those the window manager
+                    // just records are taken as they are; fullscreen and
+                    // maximized are only noted, for the compositor to
+                    // honor (which then sets them).
+                    if let Ok(reply) = conn.get_property(false, win, xwm.atoms._NET_WM_STATE, AtomEnum::ATOM, 0, 1024)?.reply() {
+                        if let Some(states) = reply.value32() {
+                            let mut wanted = surface.state.lock().unwrap();
+                            for atom in states {
+                                if [
+                                    xwm.atoms._NET_WM_STATE_ABOVE,
+                                    xwm.atoms._NET_WM_STATE_MODAL,
+                                    xwm.atoms._NET_WM_STATE_SKIP_TASKBAR,
+                                    xwm.atoms._NET_WM_STATE_SKIP_PAGER,
+                                ]
+                                .contains(&atom)
+                                {
+                                    wanted.net_state.insert(atom);
+                                } else if atom == xwm.atoms._NET_WM_STATE_FULLSCREEN {
+                                    wanted.fullscreen_at_map = true;
+                                } else if atom == xwm.atoms._NET_WM_STATE_MAXIMIZED_HORZ
+                                    || atom == xwm.atoms._NET_WM_STATE_MAXIMIZED_VERT
+                                {
+                                    wanted.maximized_at_map = true;
+                                }
+                            }
+                        }
+                    }
 
                     drop(_guard);
                     state.map_window_request(xwm_id, surface);
@@ -2489,6 +2546,32 @@ where
                                     _ => {}
                                 }
                             }
+                            // Helix: modal set or unset after mapping (upstream
+                            // ba0063fb), and always on top (upstream 5b299688).
+                            actions if actions.contains(&xwm.atoms._NET_WM_STATE_MODAL) => match data[0] {
+                                0 => state.unmodal_request(xwm_id, surface),
+                                1 => state.modal_request(xwm_id, surface),
+                                2 => {
+                                    if surface.is_popup() {
+                                        state.unmodal_request(xwm_id, surface)
+                                    } else {
+                                        state.modal_request(xwm_id, surface)
+                                    }
+                                }
+                                _ => {}
+                            },
+                            actions if actions.contains(&xwm.atoms._NET_WM_STATE_ABOVE) => match data[0] {
+                                0 => state.unabove_request(xwm_id, surface),
+                                1 => state.above_request(xwm_id, surface),
+                                2 => {
+                                    if surface.is_above() {
+                                        state.unabove_request(xwm_id, surface)
+                                    } else {
+                                        state.above_request(xwm_id, surface)
+                                    }
+                                }
+                                _ => {}
+                            },
                             _ => {}
                         }
                     }
