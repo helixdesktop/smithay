@@ -98,16 +98,31 @@ impl X11Lock {
                 if let Err(Errno::SRCH) = rustix::process::test_kill_process(pid) {
                     // no process whose pid equals the contents of the lockfile exists
                     // remove the lockfile and try grabbing it again
-                    if let Ok(()) = ::std::fs::remove_file(filename) {
+                    //
+                    // Helix: only while holding a takeover guard, and only if
+                    // the lock still names the same dead process. Two servers
+                    // that both saw the stale lock could otherwise each
+                    // remove it, the second removing the first's fresh lock,
+                    // and both use this display.
+                    let guard = format!("{}.takeover", filename);
+                    if ::std::fs::OpenOptions::new().write(true).create_new(true).open(&guard).is_err() {
+                        // someone else is taking it over
+                        return Err(());
+                    }
+                    let still_stale = ::std::fs::read(&filename).is_ok_and(|now| now.get(..11) == Some(&spid[..]));
+                    let removed = still_stale && ::std::fs::remove_file(&filename).is_ok();
+                    let result = if removed {
                         debug!(
                             display = number,
                             "Lock was blocked by a defunct X11 server, trying again"
                         );
-                        return X11Lock::grab(number);
+                        X11Lock::grab(number)
                     } else {
-                        // we could not remove the lockfile, abort
-                        return Err(());
-                    }
+                        // taken in the meantime, or we could not remove the lockfile, abort
+                        Err(())
+                    };
+                    let _ = ::std::fs::remove_file(&guard);
+                    return result;
                 }
                 // if we reach here, this lockfile exists and is probably in use, give up
                 Err(())
