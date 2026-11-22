@@ -1188,32 +1188,18 @@ impl X11Wm {
         let atom = match &*mime_type {
             "text/plain;charset=utf-8" => self.atoms.UTF8_STRING,
             "text/plain" => self.atoms.TEXT,
-            x => {
-                let prop = self
-                    .conn
-                    .get_property(true, selection.window, self.atoms.TARGETS, AtomEnum::ANY, 0, 4096)?
-                    .reply_unchecked()?
-                    .ok_or(SelectionError::UnableToDetermineAtom)?;
-                if prop.type_ != AtomEnum::ATOM.into() {
-                    return Err(SelectionError::UnableToDetermineAtom);
-                }
-                let values = prop.value32().ok_or(SelectionError::UnableToDetermineAtom)?;
-
-                let Some(atom) = values
-                    .filter_map(|atom| {
-                        let cookie = self.conn.get_atom_name(atom).ok()?;
-                        let reply = cookie.reply_unchecked().ok()?;
-                        std::str::from_utf8(&reply?.name)
-                            .ok()
-                            .map(|name| (atom, name.to_string()))
-                    })
-                    .find_map(|(atom, name)| if name == x { Some(atom) } else { None })
-                else {
-                    return Err(SelectionError::UnableToDetermineAtom);
-                };
-
-                atom
-            }
+            // Helix: the atom of the type's name (as upstream Smithay does
+            // since 0.7.0). This looked the type up in a TARGETS property
+            // on the selection window, which is never there (the owner's
+            // TARGETS are read from _WL_SELECTION and deleted), so every
+            // type but plain text failed from X11 to Wayland: images,
+            // HTML, files.
+            x => self
+                .conn
+                .intern_atom(false, x.as_bytes())?
+                .reply_unchecked()?
+                .map(|reply| reply.atom)
+                .ok_or(SelectionError::UnableToDetermineAtom)?,
         };
 
         debug!("Mime-type {:?} / Atom {:?}", mime_type, atom);
