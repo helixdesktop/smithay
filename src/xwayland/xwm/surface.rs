@@ -1064,20 +1064,18 @@ impl<D: SeatHandler + 'static> KeyboardTarget<D> for X11Surface {
         serial: Serial,
         time: u32,
     ) {
-        if self.input_mode() == InputMode::None {
-            return;
-        }
-
+        // Helix: keys reach Xwayland whatever the window's input model
+        // (upstream 211c19d7): with none, the X server hands them to the
+        // window that holds the X focus (JetBrains IDEs' popups).
         if let Some(surface) = self.state.lock().unwrap().wl_surface.as_ref() {
             KeyboardTarget::key(surface, seat, data, key, state, serial, time)
         }
     }
 
     fn modifiers(&self, seat: &Seat<D>, data: &mut D, modifiers: ModifiersState, serial: Serial) {
-        if self.input_mode() == InputMode::None {
-            return;
-        }
-
+        // Helix: keys reach Xwayland whatever the window's input model
+        // (upstream 211c19d7): with none, the X server hands them to the
+        // window that holds the X focus (JetBrains IDEs' popups).
         if let Some(surface) = self.state.lock().unwrap().wl_surface.as_ref() {
             KeyboardTarget::modifiers(surface, seat, data, modifiers, serial);
         }
