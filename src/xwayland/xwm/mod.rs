@@ -175,6 +175,11 @@ mod atoms {
             _NET_WM_MOVERESIZE,
             _NET_WM_PID,
             _NET_WM_WINDOW_TYPE,
+            // Helix: (upstream 01f3f4bd)
+            _NET_WM_WINDOW_TYPE_COMBO,
+            _NET_WM_WINDOW_TYPE_DESKTOP,
+            _NET_WM_WINDOW_TYPE_DND,
+            _NET_WM_WINDOW_TYPE_DOCK,
             _NET_WM_WINDOW_TYPE_DROPDOWN_MENU,
             _NET_WM_WINDOW_TYPE_DIALOG,
             _NET_WM_WINDOW_TYPE_MENU,
