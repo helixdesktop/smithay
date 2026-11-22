@@ -1411,6 +1411,10 @@ where
         return Ok(());
     }
 
+    // Helix: whether another client sent this event (a synthetic one, as
+    // ICCCM 4.1.4's UnmapNotify), not the X server (upstream 3a08ff96).
+    let event_sent_by_client = event.sent_event();
+
     match event {
         Event::CreateNotify(n) => {
             if n.window == xwm.wm_window
@@ -1679,7 +1683,22 @@ where
             }
         }
         Event::UnmapNotify(n) => {
-            if let Some(surface) = xwm.windows.iter().find(|x| x.window_id() == n.window).cloned() {
+            let surface = xwm.windows.iter().find(|x| x.window_id() == n.window).cloned();
+            // Helix: ICCCM 4.1.4 withdraw requests (upstream 3a08ff96). An
+            // app hiding its window unmaps it (the server's UnmapNotify)
+            // and sends one of its own: once the window has left its frame
+            // the second is not news. Override-redirect windows are not
+            // managed: only the server's notify counts.
+            let ignore = surface.as_ref().is_none_or(|surface| {
+                if surface.is_override_redirect() {
+                    event_sent_by_client
+                } else {
+                    surface.state.lock().unwrap().mapped_onto.is_none()
+                }
+            });
+            if ignore {
+                trace!(window = ?n.window, surface_found = surface.is_some(), event_sent_by_client, "ignoring UnmapNotify");
+            } else if let Some(surface) = surface {
                 xwm.client_list.retain(|w| *w != surface.window_id());
                 xwm.client_list_stacking.retain(|w| *w != surface.window_id());
                 {
@@ -1701,8 +1720,16 @@ where
                         AtomEnum::WINDOW,
                         &xwm.client_list_stacking,
                     )?;
-                    {
+                    if !surface.is_override_redirect() {
                         let mut state = surface.state.lock().unwrap();
+                        // Helix: unmap before reparenting (upstream
+                        // e592965a). A synthetic UnmapNotify can come while
+                        // the window is still mapped (shown and hidden
+                        // quickly); reparenting a mapped window maps it
+                        // again, and the MapRequest and UnmapNotify after
+                        // looped forever.
+                        let cookie = conn.unmap_window(n.window)?;
+                        xwm.sequences_to_ignore.push(Reverse(cookie.sequence_number() as u16));
                         conn.reparent_window(
                             n.window,
                             xwm.screen.root,
