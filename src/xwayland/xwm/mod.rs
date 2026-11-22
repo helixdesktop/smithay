@@ -2230,10 +2230,15 @@ where
                             return Ok(());
                         }
 
-                        let (recv_fd, send_fd) = rustix::pipe::pipe_with(
-                            rustix::pipe::PipeFlags::CLOEXEC | rustix::pipe::PipeFlags::NONBLOCK,
-                        )
-                        .map_err(|err| ConnectionError::IoError(std::io::Error::from(err)))?;
+                        // Helix: only our end is non-blocking. The write end
+                        // goes to the Wayland app, which may write in one
+                        // blocking call; non-blocking, a write past the pipe's
+                        // buffer failed and the paste ended after 64 KiB
+                        // (helixdesktop/desktop#193).
+                        let (recv_fd, send_fd) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC)
+                            .map_err(|err| ConnectionError::IoError(std::io::Error::from(err)))?;
+                        rustix::io::ioctl_fionbio(&recv_fd, true)
+                            .map_err(|err| ConnectionError::IoError(std::io::Error::from(err)))?;
 
                         // It seems that if we ever try to reply to a selection request after
                         // another has been sent by the same requestor, the requestor never reads

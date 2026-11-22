@@ -13,7 +13,8 @@ use x11rb::{
     protocol::{
         xfixes::{ConnectionExt as _, SelectionEventMask},
         xproto::{
-            Atom, AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, GetPropertyReply, PropMode,
+            Atom, AtomEnum, ChangeWindowAttributesAux, ConnectionExt as _, CreateWindowAux, EventMask,
+            GetPropertyReply, PropMode,
             SELECTION_NOTIFY_EVENT, Screen, SelectionNotifyEvent, SelectionRequestEvent, Window as X11Window,
             WindowClass,
         },
@@ -291,6 +292,17 @@ pub fn read_selection_callback(
                 requestor = transfer.request.requestor,
                 "Transfer became incremental",
             );
+            // Helix: the requestor deletes each chunk to ask for the next,
+            // and the owner has to listen for that itself (ICCCM 2.7.2);
+            // nothing did for a window the WM doesn't manage (an InputOnly
+            // requestor), so the transfer never went on
+            // (helixdesktop/desktop#193). Keep whatever else we listen for
+            // on the window.
+            let mask = conn.get_window_attributes(transfer.request.requestor)?.reply()?.your_event_mask;
+            conn.change_window_attributes(
+                transfer.request.requestor,
+                &ChangeWindowAttributesAux::new().event_mask(mask | EventMask::PROPERTY_CHANGE),
+            )?;
             conn.change_property32(
                 PropMode::REPLACE,
                 transfer.request.requestor,
