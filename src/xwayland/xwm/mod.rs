@@ -2281,7 +2281,10 @@ where
                         // from it. It appears to only ever read from the latest, so purge stale
                         // transfers to prevent clipboard hangs.
 
-                        if let Some(transfer) = selection.outgoing.remove(&n.requestor) {
+                        // Helix: a new request into the same property
+                        // replaces the old one; other properties are other
+                        // requests going on at once.
+                        if let Some(transfer) = selection.outgoing.remove(&(n.requestor, n.property)) {
                             debug!(
                                 requestor = transfer.request.requestor,
                                 "Destroying stale transfer",
@@ -2293,6 +2296,7 @@ where
                         }
 
                         let requestor = n.requestor;
+                        let property = n.property;
                         let atom = selection.atom;
 
                         let token = loop_handle.insert_source(
@@ -2306,7 +2310,7 @@ where
                                     _ => unreachable!(),
                                 };
 
-                                if let Some(transfer) = selection.outgoing.get_mut(&requestor) {
+                                if let Some(transfer) = selection.outgoing.get_mut(&(requestor, property)) {
                                     match read_selection_callback(&xwm.conn, &xwm.atoms, fd.as_fd(), transfer)
                                     {
                                         Ok(OutgoingAction::WaitForReadable) => {
@@ -2314,12 +2318,12 @@ where
                                         } // transfer ongoing
                                         Ok(OutgoingAction::Done) => {
                                             let _ = transfer.token.take();
-                                            selection.outgoing.remove(&requestor);
+                                            selection.outgoing.remove(&(requestor, property));
                                         }
                                         Err(err) => {
                                             warn!(?err, "Transfer aborted");
                                             let _ = transfer.token.take();
-                                            selection.outgoing.remove(&requestor);
+                                            selection.outgoing.remove(&(requestor, property));
                                         }
                                         Ok(OutgoingAction::DoneReading) => {
                                             let _ = transfer.token.take();
@@ -2356,7 +2360,7 @@ where
                             flush_property_on_delete: false,
                             sent_finished: false,
                         };
-                        selection.outgoing.insert(n.requestor, transfer);
+                        selection.outgoing.insert((n.requestor, n.property), transfer);
 
                         let selection_type = selection.type_();
                         drop(_guard);
@@ -2425,29 +2429,29 @@ where
                 if let Some(selection) = if xwm
                     .clipboard
                     .outgoing
-                    .get(&n.window)
-                    .is_some_and(|t| t.incr && t.request.property == n.atom)
+                    .get(&(n.window, n.atom))
+                    .is_some_and(|t| t.incr)
                 {
                     Some(&mut xwm.clipboard)
                 } else if xwm
                     .primary
                     .outgoing
-                    .get(&n.window)
-                    .is_some_and(|t| t.incr && t.request.property == n.atom)
+                    .get(&(n.window, n.atom))
+                    .is_some_and(|t| t.incr)
                 {
                     Some(&mut xwm.primary)
                 } else if xwm
                     .dnd
                     .selection
                     .outgoing
-                    .get(&n.window)
-                    .is_some_and(|t| t.incr && t.request.property == n.atom)
+                    .get(&(n.window, n.atom))
+                    .is_some_and(|t| t.incr)
                 {
                     Some(&mut xwm.dnd.selection)
                 } else {
                     None
                 } {
-                    let transfer = selection.outgoing.get_mut(&n.window).unwrap();
+                    let transfer = selection.outgoing.get_mut(&(n.window, n.atom)).unwrap();
 
                     transfer.property_set = false;
                     if transfer.flush_property_on_delete {
@@ -2464,7 +2468,7 @@ where
                                 transfer.flush_property_on_delete = true;
                             } else {
                                 // done
-                                selection.outgoing.remove(&requestor);
+                                selection.outgoing.remove(&(requestor, n.atom));
                             }
                         }
                     }

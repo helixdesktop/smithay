@@ -48,7 +48,10 @@ pub struct XWmSelection {
 
     pub pending_transfers: Arc<Mutex<HashMap<X11Window, (OwnedX11Window, OwnedFd)>>>,
     pub incoming: HashMap<X11Window, IncomingTransfer>,
-    pub outgoing: HashMap<X11Window, OutgoingTransfer>,
+    /// Helix: by requestor and property: one requestor may fetch several
+    /// targets at once, each into its own property (a drop asking for
+    /// every type) (helixdesktop/desktop#207).
+    pub outgoing: HashMap<(X11Window, Atom), OutgoingTransfer>,
 }
 
 pub struct IncomingTransfer {
@@ -239,12 +242,15 @@ impl XWmSelection {
             true
         } else {
             false
-        }) || (if let Some(transfer) = self.outgoing.remove(window) {
-            transfer.destroy(loop_handle);
-            true
-        } else {
-            false
-        }) || self.pending_transfers.lock().unwrap().remove(window).is_some()
+        }) || {
+            let keys: Vec<_> = self.outgoing.keys().filter(|(w, _)| w == window).copied().collect();
+            for key in &keys {
+                if let Some(transfer) = self.outgoing.remove(key) {
+                    transfer.destroy(loop_handle);
+                }
+            }
+            !keys.is_empty()
+        } || self.pending_transfers.lock().unwrap().remove(window).is_some()
     }
 
     pub fn has_window(&self, window: &X11Window) -> bool {
