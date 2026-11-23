@@ -42,6 +42,9 @@ pub struct XWmSelection {
     pub owner: X11Window,
     pub mime_types: Vec<String>,
     pub timestamp: u32,
+    /// Helix: the X11 owner whose TARGETS we asked for, while the answer
+    /// is still current (helixdesktop/desktop#197).
+    pub targets_for: Option<X11Window>,
 
     pub pending_transfers: Arc<Mutex<HashMap<X11Window, (OwnedX11Window, OwnedFd)>>>,
     pub incoming: HashMap<X11Window, IncomingTransfer>,
@@ -223,6 +226,7 @@ impl XWmSelection {
             owner: x11rb::NONE,
             mime_types: Vec::new(),
             timestamp: x11rb::CURRENT_TIME,
+            targets_for: None,
             pending_transfers: Arc::new(Mutex::new(HashMap::new())),
             incoming: HashMap::new(),
             outgoing: HashMap::new(),

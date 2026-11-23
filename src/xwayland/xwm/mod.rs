@@ -1308,6 +1308,9 @@ impl X11Wm {
 
         if let Some(mime_types) = mime_types {
             selection.mime_types = mime_types;
+            // Helix: a Wayland copy after an X11 one: the X11 owner's
+            // TARGETS, if still to come, are no longer the selection.
+            selection.targets_for = None;
             self.conn
                 .set_selection_owner(*selection.window, selection.atom, x11rb::CURRENT_TIME)?;
         } else if selection.owner == *selection.window {
@@ -1964,6 +1967,8 @@ where
             };
 
             selection.owner = n.owner;
+            // Helix: any TARGETS asked for an earlier owner are stale now.
+            selection.targets_for = None;
             if selection.owner == *selection.window {
                 selection.timestamp = n.timestamp;
                 return Ok(());
@@ -1978,6 +1983,7 @@ where
             }
 
             // Actually query the new selection, which will give us a SelectionNotify event
+            selection.targets_for = Some(n.owner);
             conn.convert_selection(
                 *selection.window,
                 selection.atom,
@@ -2016,7 +2022,15 @@ where
                                     })
                                     .collect::<Result<Vec<String>, _>>()?;
 
-                                if let Some(selection) = selection.type_() {
+                                // Helix: only the answer for the owner we
+                                // asked, while it still owns the selection
+                                // and no Wayland copy came after it; a stale
+                                // one would make Wayland apps paste from
+                                // our own proxy, which serves nothing
+                                // (helixdesktop/desktop#197).
+                                if selection.targets_for != Some(selection.owner) {
+                                    debug!(owner = selection.owner, "Ignoring stale TARGETS");
+                                } else if let Some(selection) = selection.type_() {
                                     drop(_guard);
                                     XwmHandler::new_selection(state, xwm_id, selection, mime_types);
                                 }
