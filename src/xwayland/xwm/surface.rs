@@ -153,6 +153,8 @@ pub(crate) struct SharedSurfaceState {
     pending_configure: Option<Rectangle<i32, Logical>>,
     // Configure update deferred while a sync request is in progress.
     buffered_configure: Option<Rectangle<i32, Logical>>,
+    // Helix: it missed a sync request; its resizes don't wait any more.
+    sync_unresponsive: bool,
 
     title: String,
     class: String,
@@ -359,6 +361,7 @@ impl X11Surface {
                 pending_sync_wait_value: None,
                 pending_configure: None,
                 buffered_configure: None,
+                sync_unresponsive: false,
                 mapped_onto: None,
                 last_configure: geometry,
                 override_redirect,
@@ -566,7 +569,7 @@ impl X11Surface {
             let rect = rect.into();
             let mut state = self.state.lock().unwrap();
 
-            if rect.size == state.last_configure.size && state.pending_configure.is_none() {
+            if (rect.size == state.last_configure.size || state.sync_unresponsive) && state.pending_configure.is_none() {
                 // If the passed size is the same as our stored geometry's size, and there's no
                 // in-flight sync request, we send a normal configure without a sync request.  Some
                 // clients, when they get a configure-notify with the same size as their current
@@ -828,7 +831,21 @@ impl X11Surface {
 
     /// Cleans up after a sync request times out.
     pub(super) fn handle_sync_timeout(&self) {
-        self.finish_pending_sync(&mut self.state.lock().unwrap());
+        // Helix: the resize waiting behind the missed sync request goes out
+        // now, and this window isn't waited on again: an app that never
+        // answers otherwise stayed at its old size for good
+        // (helixdesktop/desktop#212).
+        let buffered = {
+            let mut state = self.state.lock().unwrap();
+            self.finish_pending_sync(&mut state);
+            state.sync_unresponsive = true;
+            state.buffered_configure.take()
+        };
+        if let Some(rect) = buffered {
+            if let Err(err) = self.configure(rect) {
+                tracing::warn!(?err, "Failed to configure after a missed sync request");
+            }
+        }
     }
 
     /// Tells the X server to enable/disable commits on the window's underlying wl_surface.
