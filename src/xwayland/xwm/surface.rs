@@ -417,6 +417,8 @@ impl X11Surface {
             let state = self.state.lock().unwrap();
             if let Some(frame) = state.mapped_onto {
                 let wm_state = if mapped {
+                    // Helix: the client first, inside its frame (see MapRequest).
+                    conn.map_window(self.window)?;
                     conn.map_window(frame)?;
                     if state.net_state.contains(&self.atoms._NET_WM_STATE_HIDDEN) {
                         3u32 /*IconicState*/

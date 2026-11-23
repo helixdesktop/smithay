@@ -1686,7 +1686,6 @@ where
                             &win_aux,
                         )?;
                         let cookie2 = conn.reparent_window(win, frame_win, 0, 0)?;
-                        conn.map_window(win)?;
                         // Helix: the frame takes the client's input shape, so
                         // clicks outside it reach what's below (Xwayland makes
                         // the surface's input region from the toplevel's, the
@@ -1697,6 +1696,11 @@ where
                             conn.shape_select_input(win, true)?;
                             conn.shape_combine(SO::SET, SK::INPUT, SK::INPUT, frame_win, 0, 0, win)?;
                         }
+                        // Helix: the client is mapped with its frame
+                        // (X11Surface::set_mapped), once the compositor has
+                        // sized it: an app maximized or fullscreen before
+                        // mapping got its size only after it was shown
+                        // (helixdesktop/desktop#210).
 
                         // Ignore all events caused by reparent_window(). All those events have the sequence number
                         // of the reparent_window() request, thus remember its sequence number. The
