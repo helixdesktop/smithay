@@ -533,6 +533,17 @@ impl X11Surface {
         }
     }
 
+    /// Helix: the geometry last asked for: a configure buffered behind a
+    /// sync request, else one waiting for the client's sync, else the
+    /// last one. [`last_configure`](Self::last_configure) stays at the
+    /// previous value until a sync is answered, and the surface's size
+    /// until the client draws; this is what the compositor meant
+    /// (helixdesktop/desktop#212).
+    pub fn requested_configure(&self) -> Rectangle<i32, Logical> {
+        let state = self.state.lock().unwrap();
+        state.buffered_configure.or(state.pending_configure).unwrap_or(state.last_configure)
+    }
+
     /// Configure the window, syncing with the client's repaint.
     ///
     /// Sends a `_NET_WM_SYNC_REQUEST` message to this window, and configures it, sending a
