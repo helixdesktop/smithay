@@ -1099,10 +1099,23 @@ impl X11Wm {
                 let _ = self.conn.flush();
             });
             self.conn.grab_server()?;
-            self.conn.configure_window(
-                elem.mapped_window_id().unwrap_or_else(|| elem.window_id()),
-                &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE),
-            )?;
+            // Helix: just above the topmost other managed window, not above
+            // everything: override-redirect menus and tooltips already shown
+            // stay on top (helixdesktop/desktop#214).
+            let top = self
+                .client_list_stacking
+                .iter()
+                .rev()
+                .filter(|w| **w != elem.window_id())
+                .find_map(|w| self.windows.iter().find(|s| s.window_id() == *w));
+            if let Some(top) = top {
+                self.conn.configure_window(
+                    elem.mapped_window_id().unwrap_or_else(|| elem.window_id()),
+                    &ConfigureWindowAux::new()
+                        .sibling(top.mapped_window_id().unwrap_or_else(|| top.window_id()))
+                        .stack_mode(StackMode::ABOVE),
+                )?;
+            }
             self.client_list_stacking.retain(|e| *e != elem.window_id());
             self.client_list_stacking.push(elem.window_id());
             self.conn.change_property32(
