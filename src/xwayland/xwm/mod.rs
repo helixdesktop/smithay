@@ -2478,7 +2478,13 @@ where
                             )?
                             .reply_unchecked()?
                         {
-                            if prop.value_len == 0 {
+                            if prop.type_ == x11rb::NONE {
+                                // Helix: the property is gone already (this
+                                // notify is for a chunk deleted since): not
+                                // the empty chunk that ends the transfer
+                                // (helixdesktop/desktop#218).
+                                trace!(?transfer, "Incr chunk gone before it was read");
+                            } else if prop.value_len == 0 {
                                 debug!(?transfer, "Incr Transfer complete!");
                                 if transfer.source_data.is_empty() {
                                     selection.incoming.remove(&n.window).unwrap().destroy(loop_handle);

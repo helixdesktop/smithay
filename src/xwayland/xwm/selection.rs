@@ -391,8 +391,13 @@ pub fn write_selection_callback(
         Err(err) => {
             warn!(?err, "Transfer errored");
             if transfer.incr {
-                // even if it failed, we still need to drain the incr transfer
-                conn.delete_property(*transfer.window, atoms._WL_SELECTION)?;
+                // Helix: keep draining the incr transfer (each chunk read
+                // deletes the property, asking for the next), but drop the
+                // data and delete nothing here: a second delete could take
+                // the next chunk unread, and the owner stalled
+                // (helixdesktop/desktop#218).
+                let _ = (conn, atoms);
+                transfer.source_data.clear();
                 Ok(IncomingAction::WaitForProperty)
             } else {
                 Ok(IncomingAction::Done)
