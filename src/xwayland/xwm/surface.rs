@@ -1778,6 +1778,10 @@ impl X11Surface {
             )?
             .reply_unchecked()
         {
+            // Helix: a deleted WM_PROTOCOLS (no type) means none: an app
+            // that stopped listing WM_DELETE_WINDOW kept getting it
+            // (helixdesktop/desktop#209).
+            Ok(Some(reply)) if reply.type_ == x11rb::NONE => Some(Vec::new()),
             Ok(Some(reply)) => reply.value32().map(|vals| vals.collect::<Vec<_>>()),
             Ok(None) | Err(ConnectionError::ParseError(_)) => return Ok(()),
             Err(err) => return Err(err),
@@ -2010,7 +2014,11 @@ impl X11Surface {
             );
             conn.send_event(false, self.window, EventMask::NO_EVENT, event)?;
         } else {
-            conn.destroy_window(self.window)?;
+            // Helix: disconnect the app (ICCCM 4.2.8.1: without
+            // WM_DELETE_WINDOW the WM kills the client), rather than
+            // destroying the one window and leaving the app running
+            // without it (helixdesktop/desktop#209).
+            conn.kill_client(self.window)?;
         }
         conn.flush()
     }
