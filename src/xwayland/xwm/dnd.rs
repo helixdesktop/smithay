@@ -111,7 +111,11 @@ impl XWmDnd {
                     .as_ref()
                     .is_some_and(|w| w == window)
             {
-                self.active_drag.take();
+                // Helix: the X11 side of the drag is over; the caller ends
+                // the Wayland side's grab (helixdesktop/desktop#206).
+                if let Some(drag) = self.active_drag.take() {
+                    drag.state.lock().unwrap().x11 = X11State::Finished;
+                }
                 self.xdnd_active.store(false, Ordering::Release);
                 res = true;
             }

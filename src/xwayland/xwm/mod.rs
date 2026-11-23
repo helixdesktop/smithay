@@ -139,7 +139,8 @@ use crate::{
         dnd::{DndFocus, DndGrabHandler},
     },
     output::Output,
-    utils::{Client, Logical, Point, Rectangle, Size, x11rb::X11Source},
+    backend::input::InputTime,
+    utils::{Client, Logical, Point, Rectangle, SERIAL_COUNTER, Size, x11rb::X11Source},
     wayland::{
         selection::SelectionTarget,
         xwayland_shell::{self, XWaylandShellHandler},
@@ -1945,12 +1946,33 @@ where
         Event::DestroyNotify(n) => {
             xwm.clipboard.window_destroyed(&n.window, loop_handle);
             xwm.primary.window_destroyed(&n.window, loop_handle);
+            let had_drag = xwm.dnd.active_drag.is_some();
             xwm.dnd.window_destroyed(&n.window, loop_handle);
+            // Helix: an X11 drag whose source went away ends on the
+            // Wayland side too: its grab is the seat's (started when the
+            // drag began), and it would otherwise go on, the pointer stuck
+            // in it until the button was released (helixdesktop/desktop#206).
+            let drag_ended = had_drag && xwm.dnd.active_drag.is_none();
 
-            if let Some(pos) = xwm.windows.iter().position(|x| x.window_id() == n.window) {
-                let surface = xwm.windows.remove(pos);
+            let destroyed = xwm
+                .windows
+                .iter()
+                .position(|x| x.window_id() == n.window)
+                .map(|pos| xwm.windows.remove(pos));
+            drop(_guard);
+            if drag_ended {
+                let seats = state.seat_state().seats.clone();
+                for seat in seats {
+                    if let Some(pointer) = seat.get_pointer().filter(|p| p.is_grabbed()) {
+                        pointer.unset_grab(state, SERIAL_COUNTER.next_serial(), InputTime::now());
+                    }
+                    if let Some(touch) = seat.get_touch().filter(|t| t.is_grabbed()) {
+                        touch.unset_grab(state);
+                    }
+                }
+            }
+            if let Some(surface) = destroyed {
                 surface.handle_destroyed();
-                drop(_guard);
                 state.destroyed_window(xwm_id, surface);
             }
         }
