@@ -1965,6 +1965,12 @@ where
                             xwm.atoms.WM_STATE,
                             &[0 /*WithdrawnState*/, 0 /*WINDOW_NONE*/],
                         )?;
+                        // Helix: a withdrawn window has no _NET_WM_STATE
+                        // (EWMH: the WM removes it on withdrawal), so the
+                        // next map starts from what the client sets then
+                        // (helixdesktop/desktop#215).
+                        conn.delete_property(n.window, xwm.atoms._NET_WM_STATE)?;
+                        state.net_state.clear();
                     }
                 }
                 drop(_guard);
