@@ -1157,7 +1157,9 @@ impl X11Surface {
         state
             .normal_hints
             .as_ref()
-            .and_then(|hints| hints.min_size)
+            // Helix: without a minimum, the base size is the minimum
+            // (ICCCM 4.1.2.3) (helixdesktop/desktop#211).
+            .and_then(|hints| hints.min_size.or(hints.base_size))
             .map(Size::<i32, Client>::from)
             .map(|s| s.to_f64().to_logical(client_scale).to_i32_round())
     }
