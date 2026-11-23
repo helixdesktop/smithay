@@ -1751,21 +1751,29 @@ where
                     drop(_guard);
                     state.mapped_override_redirect_window(xwm_id, surface);
                 } else {
-                    xwm.client_list.push(surface.window_id());
-                    xwm.client_list_stacking.push(surface.window_id());
+                    // Helix: once each, however often the client maps it
+                    // (a MapWindow on a mapped window, as GTK 4 sends,
+                    // appended it again) (helixdesktop/desktop#213).
+                    let id = surface.window_id();
+                    if !xwm.client_list.contains(&id) {
+                        xwm.client_list.push(id);
+                    }
+                    if !xwm.client_list_stacking.contains(&id) {
+                        xwm.client_list_stacking.push(id);
+                    }
                     conn.change_property32(
-                        PropMode::APPEND,
+                        PropMode::REPLACE,
                         xwm.screen.root,
                         xwm.atoms._NET_CLIENT_LIST,
                         AtomEnum::WINDOW,
-                        &[surface.window_id()],
+                        &xwm.client_list,
                     )?;
                     conn.change_property32(
-                        PropMode::APPEND,
+                        PropMode::REPLACE,
                         xwm.screen.root,
                         xwm.atoms._NET_CLIENT_LIST_STACKING,
                         AtomEnum::WINDOW,
-                        &[surface.window_id()],
+                        &xwm.client_list_stacking,
                     )?;
                     drop(_guard);
                     state.map_window_notify(xwm_id, surface);
