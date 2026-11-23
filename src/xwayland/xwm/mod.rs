@@ -1674,6 +1674,16 @@ where
                         )?;
                         let cookie2 = conn.reparent_window(win, frame_win, 0, 0)?;
                         conn.map_window(win)?;
+                        // Helix: the frame takes the client's input shape, so
+                        // clicks outside it reach what's below (Xwayland makes
+                        // the surface's input region from the toplevel's, the
+                        // frame's), and follows it when it changes
+                        // (helixdesktop/desktop#208).
+                        {
+                            use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
+                            conn.shape_select_input(win, true)?;
+                            conn.shape_combine(SO::SET, SK::INPUT, SK::INPUT, frame_win, 0, 0, win)?;
+                        }
 
                         // Ignore all events caused by reparent_window(). All those events have the sequence number
                         // of the reparent_window() request, thus remember its sequence number. The
@@ -1941,6 +1951,19 @@ where
                 {
                     surface.set_wl_surface(state, None);
                 }
+            }
+        }
+        Event::ShapeNotify(n) if n.shape_kind == x11rb::protocol::shape::SK::INPUT => {
+            // Helix: keep the frame's input shape the client's.
+            if let Some(frame) = xwm
+                .windows
+                .iter()
+                .find(|x| x.window_id() == n.affected_window)
+                .and_then(|x| x.mapped_window_id())
+            {
+                use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
+                conn.shape_combine(SO::SET, SK::INPUT, SK::INPUT, frame, 0, 0, n.affected_window)?;
+                conn.flush()?;
             }
         }
         Event::DestroyNotify(n) => {

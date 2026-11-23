@@ -483,6 +483,12 @@ impl X11Surface {
                     .border_width(0);
                 conn.configure_window(frame, &aux)?;
                 conn.configure_window(self.window, &win_aux)?;
+                // Helix: the frame's input shape again, at the new size (an
+                // unshaped client's is its size) (helixdesktop/desktop#208).
+                {
+                    use x11rb::protocol::shape::{ConnectionExt as _, SK, SO};
+                    conn.shape_combine(SO::SET, SK::INPUT, SK::INPUT, frame, 0, 0, self.window)?;
+                }
                 send_configure_notify(&conn, &self.window, rect, false)?;
             } else {
                 conn.configure_window(self.window, &aux)?;
