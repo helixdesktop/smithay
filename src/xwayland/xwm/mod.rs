@@ -2265,7 +2265,7 @@ where
                             return Ok(());
                         }
 
-                        let targets = [xwm.atoms.TARGETS, xwm.atoms.TIMESTAMP]
+                        let mut targets = [xwm.atoms.TARGETS, xwm.atoms.TIMESTAMP]
                             .iter()
                             .copied()
                             .chain(
@@ -2275,6 +2275,14 @@ where
                                     .filter_map(|mime| atom_from_mime(mime, &conn, &xwm.atoms).ok()?),
                             )
                             .collect::<Vec<u32>>();
+                        // Helix: text is offered under every X11 text target.
+                        if text_mime(&selection.mime_types).is_some() {
+                            for atom in [xwm.atoms.UTF8_STRING, xwm.atoms.TEXT, AtomEnum::STRING.into()] {
+                                if !targets.contains(&atom) {
+                                    targets.push(atom);
+                                }
+                            }
+                        }
                         trace!(requstor = n.requestor, ?targets, "Sending TARGETS");
                         conn.change_property32(
                             PropMode::REPLACE,
@@ -2304,11 +2312,26 @@ where
                         send_selection_notify_resp(&conn, &n, true)?;
                     }
                     target => {
-                        let Some(mime_type) = mime_from_atom(target, &conn, &xwm.atoms)? else {
+                        let Some(mut mime_type) = mime_from_atom(target, &conn, &xwm.atoms)? else {
                             debug!("Unable to determine mime type from atom: {}", target);
                             send_selection_notify_resp(&conn, &n, false)?;
                             return Ok(());
                         };
+                        // Helix: X11's other text targets (STRING, TEXT) get
+                        // the Wayland side's text; apps asking only for
+                        // those (older toolkits, xclip -t STRING) got
+                        // nothing (helixdesktop/desktop#216). The text
+                        // is sent as UTF-8 (ICCCM allows the owner's choice
+                        // for TEXT; for STRING, ASCII is the same either way).
+                        if !selection.mime_types.contains(&mime_type)
+                            && (target == xwm.atoms.TEXT
+                                || target == xwm.atoms.UTF8_STRING
+                                || target == AtomEnum::STRING.into())
+                        {
+                            if let Some(text) = text_mime(&selection.mime_types) {
+                                mime_type = text.to_owned();
+                            }
+                        }
 
                         if !selection.mime_types.contains(&mime_type) {
                             warn!(mime_type, "Mime type requested by X client not offered",);
@@ -2986,6 +3009,14 @@ fn send_configure_notify(
     )?;
     conn.flush()?;
     Ok(())
+}
+
+/// Helix: the Wayland text type to serve X11's text targets from, if
+/// the selection has text (UTF-8 first).
+fn text_mime(mime_types: &[String]) -> Option<&str> {
+    ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"]
+        .into_iter()
+        .find(|text| mime_types.iter().any(|m| m == text))
 }
 
 fn mime_from_atom(
