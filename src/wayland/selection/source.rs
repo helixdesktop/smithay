@@ -35,6 +35,18 @@ impl SelectionSource {
             SelectionSourceProvider::ExtDataControl(source) => source.client(),
         }
     }
+
+    /// Helix: whether the source still exists (`false` once its client
+    /// destroyed it, or is gone). The selection it was is dropped then
+    /// without a call to [`super::SelectionHandler::new_selection`].
+    pub fn is_alive(&self) -> bool {
+        match &self.provider {
+            SelectionSourceProvider::DataDevice(source) => source.is_alive(),
+            SelectionSourceProvider::Primary(source) => source.is_alive(),
+            SelectionSourceProvider::WlrDataControl(source) => source.is_alive(),
+            SelectionSourceProvider::ExtDataControl(source) => source.is_alive(),
+        }
+    }
 }
 
 /// Provider of the selection data.
